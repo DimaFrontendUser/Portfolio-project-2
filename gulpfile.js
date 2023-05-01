@@ -1,28 +1,126 @@
-'use strict'
+"use strict"
 
-const {src, dest, watch, parallel, series} = require('gulp');
-
-const scss   = require('gulp-sass')(require('sass'));
-const concat = require('gulp-concat');
+const {src, dest} = require("gulp");
+const gulp = require("gulp");
+const autoprefixer = require("gulp-autoprefixer");
+const removeComments = require('gulp-strip-css-comments');
+const rename = require("gulp-rename");
+const rigger = require("gulp-rigger")
+const sass = require("gulp-sass")(require('sass'));
+const cssnano = require("gulp-cssnano");
+const plumber = require("gulp-plumber");
+const panini = require("panini");
+const imagemin = require("gulp-imagemin");
+const del = require("del");
+const notify = require("gulp-notify");
+const browserSync = require("browser-sync").create();
 const uglify = require('gulp-uglify-es').default;
-const browserSync = require('browser-sync').create();
-const autoprefixer = require('gulp-autoprefixer');
-const clean = require('gulp-clean');
-const imagemin = require('gulp-imagemin');
 
-function scripts() {
-    return src([
-        'node_modules/swiper/swiper-bundle.js',
-        'app/js/main.js'
-    ])
-        .pipe(concat('main.min.js'))
+/* Paths */
+const srcPath = "src/"
+const distPath = "dist/"
+
+
+const path = {
+    build: {
+        html: distPath,
+        css: distPath + "assets/css/",
+        js: distPath + "assets/js/",
+        images: distPath + "assets/img/",
+        fonts: distPath + "assets/fonts/"
+    },
+    src: {
+        html: srcPath + "*.html",
+        css: srcPath + "assets/scss/*.scss",
+        js: srcPath + "assets/js/*.js",
+        images: srcPath + "assets/img/**/*.{jpg,png,svg,gif,ico,webp,webmanifest,xml,json}",
+        fonts:  srcPath + "assets/fonts/**/*.{eot,woff,woff2,ttf,svg}"
+    },
+    watch: {
+        html:   srcPath + "**/*.html",
+        js:     srcPath + "assets/js/**/*.js",
+        css:    srcPath + "assets/scss/**/*.scss",
+        images: srcPath + "assets/img/**/*.{jpg,png,svg,gif,ico,webp,webmanifest,xml,json}",
+        fonts:  srcPath + "assets/fonts/**/*.{eot,woff,woff2,ttf,svg}"
+    },
+    clean: "./" + distPath
+}
+
+function serve() {
+    browserSync.init({
+        server: {
+            baseDir: "./" + distPath
+        }
+    });
+}
+
+
+function html() {
+    panini.refresh()
+    return src(path.src.html, {base: srcPath})
+        .pipe(plumber())
+        .pipe(panini({
+            root: srcPath,
+            layouts: srcPath + "tpl/layouts/",
+            partials: srcPath + "tpl/partials/",
+          }))
+        .pipe(dest(path.build.html))
+        .pipe(browserSync.reload({stream: true}));
+}
+
+function css() {
+    return src(path.src.css, {base: srcPath + "assets/scss/"})
+        .pipe(plumber({
+            errorHandler : function(err) {
+                notify.onError({
+                    title:    "SCSS Error",
+                    message:  "Error: <%= error.message %>"
+                })(err);
+                this.emit('end');
+            }
+        }))
+        .pipe(sass())
+        .pipe(autoprefixer())
+        .pipe(dest(path.build.css))
+        .pipe(cssnano({
+            zindex: false,
+            discardComments: {
+                removeAll: true
+            }
+        }))
+        .pipe(removeComments())
+        .pipe(rename({
+            suffix: ".min",
+            extname: ".css"
+        }))
+        .pipe(dest(path.build.css))
+        .pipe(browserSync.reload({stream: true}));
+}
+
+function js() {
+    return src(path.src.js, {base: srcPath + "assets/js/"})
+        .pipe(plumber({
+            errorHandler : function(err) {
+                notify.onError({
+                    title:    "JS Error",
+                    message:  "Error: <%= error.message %>"
+                })(err);
+                this.emit('end');
+            }
+        }))
+        .pipe(rigger())
+        .pipe(dest(path.build.js))
         .pipe(uglify())
-        .pipe(dest('app/js'))
-        .pipe(browserSync.stream())
+        .pipe(rename({
+            suffix: ".min",
+            extname: ".js"
+        }))
+        .pipe(dest(path.build.js))
+        .pipe(browserSync.reload({stream: true}));
 }
 
 function images() {
-    return src('app/images/**/*')
+    return src(path.src.images, {base: srcPath + "assets/img/"})
         .pipe(imagemin([
             imagemin.gifsicle({interlaced: true}),
             imagemin.mozjpeg({quality: 75, progressive: true}),
@@ -33,60 +131,42 @@ function images() {
                     {cleanupIDs: false}
                 ]
             })
-        ]
-        ))
-        .pipe(dest('dist/images'))
+        ]))
+        .pipe(dest(path.build.images))
+        .pipe(browserSync.reload({stream: true}));
 }
+
 
 function fonts() {
-    return src('app/fonts/')
+    return src(path.src.fonts, {base: srcPath + "assets/fonts/"})
+    .pipe(dest(path.build.fonts))
+    .pipe(browserSync.reload({stream: true}));
 }
 
-function styles() {
-    return src('app/scss/style.scss')
-        .pipe(autoprefixer({overrideBrowserlist: ['last 10 version']}))
-        .pipe(concat('style.min.css'))
-        .pipe(scss({outputStyle: 'compressed'}))
-        .pipe(dest('app/css'))
-        .pipe(browserSync.stream())
+function clean() {
+    return del(path.clean)
 }
 
-function watching() {
-    watch(['app/scss/style.scss'], styles)
-    watch(['app/js/main.js'], scripts)
-    watch(['app/*.html']).on('change', browserSync.reload)
+function watchFiles() {
+    gulp.watch([path.watch.html], html)
+    gulp.watch([path.watch.css], css)
+    gulp.watch([path.watch.js], js)
+    gulp.watch([path.watch.images], images)
+    gulp.watch([path.watch.fonts], fonts)
 }
 
-function browsersync() {
-    browserSync.init({
-        server: {
-            baseDir: 'app/'
-        }
-    })
-}
-
-function building() {
-    return src([
-        'app/css/style.min.css',
-        'app/js/main.min.js',
-        'app/**/*.html'
-    ], {base: 'app'})
-    .pipe(dest('dist'))
-}
-
-function cleanDist() {
-    return src('dist')
-        .pipe(clean())
-}
+const build = gulp.series(clean,gulp.parallel(css, html, js, images, fonts))
+const watch = gulp.parallel(build, watchFiles, serve)
 
 
 
-exports.styles = styles; 
-exports.scripts = scripts;
-exports.watching = watching;
-exports.browsersync = browsersync;
-exports.images = images;
-exports.fonts = fonts;
 
-exports.build = series(cleanDist, images, building);
-exports.default = parallel(styles, scripts, browsersync, watching);
+exports.html = html
+exports.css = css
+exports.js = js
+exports.images = images
+exports.fonts = fonts
+exports.clean = clean
+exports.build = build
+exports.watch = watch
+exports.default = watch
